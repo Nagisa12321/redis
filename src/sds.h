@@ -40,6 +40,10 @@ extern const char *SDS_NOINIT;
 #include <stdarg.h>
 #include <stdint.h>
 
+// notes
+// 与传统char *做兼容。
+// 但sds是binary safe的
+// 就是说在sds之间可以含有‘\0’
 typedef char *sds;
 
 /* Note: sdshdr5 is never used, we just access the flags byte directly.
@@ -48,10 +52,22 @@ struct __attribute__ ((__packed__)) sdshdr5 {
     unsigned char flags; /* 3 lsb of type, and 5 msb of string length */
     char buf[];
 };
+
+// notes
+// __attribute__ ((__packed__))
+// 让编译器以紧凑方式分配内存
+// 不然可能会对其内存，导致无法按照定向
+// 低地址偏移1字节定位flag
 struct __attribute__ ((__packed__)) sdshdr8 {
     uint8_t len; /* used */
     uint8_t alloc; /* excluding the header and null terminator */
     unsigned char flags; /* 3 lsb of type, 5 unused bits */
+
+    // notes
+    // fiexible array member
+    // C中定义字符数组的一种特殊写法
+    // 在结构体最后一个字段。标记作用
+    // 不占内存空间，不等同与char *
     char buf[];
 };
 struct __attribute__ ((__packed__)) sdshdr16 {
