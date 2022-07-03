@@ -101,6 +101,7 @@ struct __attribute__ ((__packed__)) sdshdr64 {
 #define SDS_TYPE_5_LEN(f) ((f)>>SDS_TYPE_BITS)
 
 static inline size_t sdslen(const sds s) {
+    // 非常crazy的写法。。
     unsigned char flags = s[-1];
     switch(flags&SDS_TYPE_MASK) {
         case SDS_TYPE_5:
@@ -233,7 +234,11 @@ static inline void sdssetalloc(sds s, size_t newlen) {
 
 sds sdsnewlen(const void *init, size_t initlen);
 sds sdstrynewlen(const void *init, size_t initlen);
+// notes
+// 由init为原型创建sds
 sds sdsnew(const char *init);
+// 创建一个空的
+// sds字符串
 sds sdsempty(void);
 sds sdsdup(const sds s);
 void sdsfree(sds s);
