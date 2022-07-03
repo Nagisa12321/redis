@@ -97,16 +97,26 @@ static inline size_t sdsTypeMaxSize(char type) {
  *
  * mystring = sdsnewlen("abc",3);
  *
+ // notes
+ // 此处就是说sds字符串会用0结尾
+ // 所以用户可以传一个非0结尾字符串，
+ // 依然适用于c字符串相关函数
+ // 
  * You can print the string with printf() as there is an implicit \0 at the
  * end of the string. However the string is binary safe and can contain
  * \0 characters in the middle, as the length is stored in the sds header. */
 sds _sdsnewlen(const void *init, size_t initlen, int trymalloc) {
     void *sh;
     sds s;
+    // 通过长度选择适合的字符串类型
     char type = sdsReqType(initlen);
     /* Empty strings are usually created in order to append. Use type 8
      * since type 5 is not good at this. */
+    // 字符串是type5,还是用type8来分配内存，
     if (type == SDS_TYPE_5 && initlen == 0) type = SDS_TYPE_8;
+
+    // 通过type，能的到具体字符串类型
+    // 因此也可以或的header长度
     int hdrlen = sdsHdrSize(type);
     unsigned char *fp; /* flags pointer. */
     size_t usable;
@@ -114,14 +124,18 @@ sds _sdsnewlen(const void *init, size_t initlen, int trymalloc) {
     assert(initlen + hdrlen + 1 > initlen); /* Catch size_t overflow */
     sh = trymalloc?
         s_trymalloc_usable(hdrlen+initlen+1, &usable) :
+        // 注意此处+1, 最后一个字节总是0填充。
         s_malloc_usable(hdrlen+initlen+1, &usable);
     if (sh == NULL) return NULL;
     if (init==SDS_NOINIT)
         init = NULL;
     else if (!init)
         memset(sh, 0, hdrlen+initlen+1);
+    // s是相应struct中的buf. 与c字符串相同
     s = (char*)sh+hdrlen;
+    // fp是flat的指针
     fp = ((unsigned char*)s)-1;
+    // usbale是buf的长度, 可用内存长度
     usable = usable-hdrlen-1;
     if (usable > sdsTypeMaxSize(type))
         usable = sdsTypeMaxSize(type);
@@ -131,6 +145,8 @@ sds _sdsnewlen(const void *init, size_t initlen, int trymalloc) {
             break;
         }
         case SDS_TYPE_8: {
+            // 这里可以进去看看
+            // 又创建了一个sh变量
             SDS_HDR_VAR(8,s);
             sh->len = initlen;
             sh->alloc = usable;
@@ -160,6 +176,7 @@ sds _sdsnewlen(const void *init, size_t initlen, int trymalloc) {
         }
     }
     if (initlen && init)
+        // 将char *字符串拷贝到sds之上
         memcpy(s, init, initlen);
     s[initlen] = '\0';
     return s;
@@ -196,6 +213,10 @@ sds sdsdup(const sds s) {
 /* Free an sds string. No operation is performed if 's' is NULL. */
 void sdsfree(sds s) {
     if (s == NULL) return;
+
+    // notes
+    // 内存段要整体释放
+    // 因此需要计算出sds的首地址
     s_free((char*)s-sdsHdrSize(s[-1]));
 }
 
@@ -241,6 +262,7 @@ void sdsclear(sds s) {
  * by sdslen(), but only the free buffer space we have. */
 sds _sdsMakeRoomFor(sds s, size_t addlen, int greedy) {
     void *sh, *newsh;
+    // avail 是s的剩余可用空间
     size_t avail = sdsavail(s);
     size_t len, newlen, reqlen;
     char type, oldtype = s[-1] & SDS_TYPE_MASK;
@@ -248,12 +270,18 @@ sds _sdsMakeRoomFor(sds s, size_t addlen, int greedy) {
     size_t usable;
 
     /* Return ASAP if there is enough space left. */
+    // 如果剩余可用空间比需要的空间还多
+    // 那直接返回原来的即可
     if (avail >= addlen) return s;
 
+    // 原来的长度
     len = sdslen(s);
+
+    // 原来的header
     sh = (char*)s-sdsHdrSize(oldtype);
     reqlen = newlen = (len+addlen);
     assert(newlen > len);   /* Catch size_t overflow */
+    // 预留空间（贪婪）
     if (greedy == 1) {
         if (newlen < SDS_MAX_PREALLOC)
             newlen *= 2;
@@ -261,6 +289,7 @@ sds _sdsMakeRoomFor(sds s, size_t addlen, int greedy) {
             newlen += SDS_MAX_PREALLOC;
     }
 
+    // 新的类型
     type = sdsReqType(newlen);
 
     /* Don't use type 5: the user is appending to the string and type 5 is
@@ -271,7 +300,7 @@ sds _sdsMakeRoomFor(sds s, size_t addlen, int greedy) {
     hdrlen = sdsHdrSize(type);
     assert(hdrlen + newlen + 1 > reqlen);  /* Catch size_t overflow */
     if (oldtype==type) {
-        newsh = s_realloc_usable(sh, hdrlen+newlen+1, &usable);
+        newsh = s_Zrealloc_usable(sh, hdrlen+newlen+1, &usable);
         if (newsh == NULL) return NULL;
         s = (char*)newsh+hdrlen;
     } else {
@@ -499,6 +528,10 @@ sds sdsgrowzero(sds s, size_t len) {
 sds sdscatlen(sds s, const void *t, size_t len) {
     size_t curlen = sdslen(s);
 
+    // notes
+    // 为s之后制造可以有len的空间
+    // 有可能会触发内存重新分配
+    // （也是不用HDR5的原因）
     s = sdsMakeRoomFor(s,len);
     if (s == NULL) return NULL;
     memcpy(s+curlen, t, len);
