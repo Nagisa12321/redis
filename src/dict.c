@@ -116,6 +116,9 @@ int _dictInit(dict *d, dictType *type)
     _dictReset(d, 0);
     _dictReset(d, 1);
     d->type = type;
+
+    // notes
+    // 设置为-1，意思是非处于渐进式扩容状态！
     d->rehashidx = -1;
     d->pauserehash = 0;
     return DICT_OK;
@@ -140,6 +143,9 @@ int dictResize(dict *d)
 
 // notes
 // 扩容
+// 注意：dictExpand只是创建了一段连续的空间，相当于标记了：正在渐进式扩容中
+// 在以后的CRUD过程中都会通过_dictRehashStep()来进行真正的扩容移动，如果当前
+// 正在渐进式扩容中的话
 int _dictExpand(dict *d, unsigned long size, int* malloc_failed)
 {
     if (malloc_failed) *malloc_failed = 0;
@@ -195,6 +201,9 @@ int _dictExpand(dict *d, unsigned long size, int* malloc_failed)
     d->ht_size_exp[1] = new_ht_size_exp;
     d->ht_used[1] = new_ht_used;
     d->ht_table[1] = new_ht_table;
+    // 此句话标记正在扩容中
+    // 不在扩容中默认为-1
+    // -1应该是在初始化过程中赋予
     d->rehashidx = 0;
     return DICT_OK;
 }
@@ -220,6 +229,11 @@ int dictTryExpand(dict *d, unsigned long size) {
  * guaranteed that this function will rehash even a single bucket, since it
  * will visit at max N*10 empty buckets in total, otherwise the amount of
  * work it does would be unbound and the function may block for a long time. */
+// notes
+// 执行 N 步增量重新散列。 如果仍有键从旧哈希表移动到新哈希表，则返回 1，否则返回 0。
+// 请注意，重新散列步骤包括将存储桶（可能有多个键，因为我们使用链接）从旧哈希表移动到 新的哈希表，
+// 但是由于哈希表的一部分可能由空格组成，因此不能保证此函数甚至会重新哈希单个桶，
+// 因为它总共会访问最多 N*10 个空桶，否则数量 它所做的工作将不受约束，并且该功能可能会阻塞很长时间。 
 int dictRehash(dict *d, int n) {
     int empty_visits = n*10; /* Max number of empty buckets to visit. */
     if (!dictIsRehashing(d)) return 0;
@@ -236,11 +250,20 @@ int dictRehash(dict *d, int n) {
         }
         de = d->ht_table[0][d->rehashidx];
         /* Move all the keys in this bucket from the old to the new hash HT */
+        // notes
+        // 遍历一条拉链
+        // 将其添加到d->ht_table[1]之中，如果存在的话
+        // 为什么不整条添加？
+        // 因为新的哈希表和旧的大小不一
+        // 可能导致原来在一条拉链上边的两个entry现在位于两个不同
+        // 的拉链中，因此只能逐个添加
         while(de) {
             uint64_t h;
 
             nextde = de->next;
             /* Get the index in the new hash table */
+            // hash一致，但是mask不一致（取决于大小），因此计算出来的h
+            // 下标不一致
             h = dictHashKey(d, de->key) & DICTHT_SIZE_MASK(d->ht_size_exp[1]);
             de->next = d->ht_table[1][h];
             d->ht_table[1][h] = de;
@@ -253,7 +276,9 @@ int dictRehash(dict *d, int n) {
     }
 
     /* Check if we already rehashed the whole table... */
+    // 如果现在一斤rehash完了，又要返回原有状态
     if (d->ht_used[0] == 0) {
+        // 清除掉原有的0
         zfree(d->ht_table[0]);
         /* Copy the new ht onto the old one */
         d->ht_table[0] = d->ht_table[1];
@@ -299,6 +324,14 @@ int dictRehashMilliseconds(dict *d, int ms) {
  * This function is called by common lookup or update operations in the
  * dictionary so that the hash table automatically migrates from H1 to H2
  * while it is actively used. */
+// notes
+// 这个函数只执行一个重新散列的步骤，
+// 并且只有在我们的散列表没有暂停散列的情况下。 
+// 当我们在重新散列的中间有迭代器时，
+// 我们不能弄乱两个散列表，
+// 否则一些元素可能会丢失或重复。
+// 此函数由字典中的常见查找或更新操作调用，
+// 以便散列表自动迁移 H1 到 H2，而它被积极使用。
 static void _dictRehashStep(dict *d) {
     if (d->pauserehash == 0) dictRehash(d,1);
 }

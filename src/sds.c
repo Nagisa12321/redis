@@ -300,7 +300,7 @@ sds _sdsMakeRoomFor(sds s, size_t addlen, int greedy) {
     hdrlen = sdsHdrSize(type);
     assert(hdrlen + newlen + 1 > reqlen);  /* Catch size_t overflow */
     if (oldtype==type) {
-        newsh = s_Zrealloc_usable(sh, hdrlen+newlen+1, &usable);
+        newsh = s_realloc_usable(sh, hdrlen+newlen+1, &usable);
         if (newsh == NULL) return NULL;
         s = (char*)newsh+hdrlen;
     } else {
