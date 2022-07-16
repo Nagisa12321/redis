@@ -44,6 +44,14 @@
 #define DICT_OK 0
 #define DICT_ERR 1
 
+// notes
+// dict 的本质其实是一个hashmap，
+// 因此注意观察其CRUD，用到了桶的特性
+
+// notes
+// Entry即为桶的特性，可以看出实现为链表，有next指针
+// 可以看出redis解决hash冲突使用拉链法
+// 每个entry还有相应的key，val（metaData）
 typedef struct dictEntry {
     void *key;
     union {
@@ -60,13 +68,15 @@ typedef struct dictEntry {
 
 typedef struct dict dict;
 
+// notes
+// dict的类型，
 typedef struct dictType {
-    uint64_t (*hashFunction)(const void *key);
-    void *(*keyDup)(dict *d, const void *key);
-    void *(*valDup)(dict *d, const void *obj);
-    int (*keyCompare)(dict *d, const void *key1, const void *key2);
-    void (*keyDestructor)(dict *d, void *key);
-    void (*valDestructor)(dict *d, void *obj);
+    uint64_t (*hashFunction)(const void *key); // hash函数，将key转换为hash值
+    void *(*keyDup)(dict *d, const void *key); // key复制函数
+    void *(*valDup)(dict *d, const void *obj); // val复制函数
+    int (*keyCompare)(dict *d, const void *key1, const void *key2); // key比较函数，java的compare也是这种思想
+    void (*keyDestructor)(dict *d, void *key); // key销毁函数
+    void (*valDestructor)(dict *d, void *obj); // val销毁函数
     int (*expandAllowed)(size_t moreMem, double usedRatio);
     /* Allow a dictEntry to carry extra caller-defined metadata.  The
      * extra memory is initialized to 0 when a dictEntry is allocated. */
@@ -76,11 +86,13 @@ typedef struct dictType {
 #define DICTHT_SIZE(exp) ((exp) == -1 ? 0 : (unsigned long)1<<(exp))
 #define DICTHT_SIZE_MASK(exp) ((exp) == -1 ? 0 : (DICTHT_SIZE(exp))-1)
 
+// notes
+// 代表一个hash表
 struct dict {
-    dictType *type;
+    dictType *type; // 需要带有dictType表示类型，可以处理key和val
 
-    dictEntry **ht_table[2];
-    unsigned long ht_used[2];
+    dictEntry **ht_table[2]; // dict中的连续空间，分为两段，表示扩容先后
+    unsigned long ht_used[2]; // hash表的扩容
 
     long rehashidx; /* rehashing not in progress if rehashidx == -1 */
 
@@ -88,6 +100,20 @@ struct dict {
     int16_t pauserehash; /* If >0 rehashing is paused (<0 indicates coding error) */
     signed char ht_size_exp[2]; /* exponent of size. (size = 1<<exp) */
 };
+
+// notes
+// redis hash表的扩容：采用渐进式hash
+// 熟悉java的同学应该知道，java hashmap的扩容是新建新的hashmap
+// 将原有hashmap内容搬移过去，因此扩容是个非常耗时的操作
+// 
+// redis是单线程的，因此不存在线程安全问题，但是在扩容过程
+// 什么其他的事情也做不了，所以处理方案是化整为零，将一次大的扩容拆分成
+// 一次次小的扩容来节约一次性浪费太多时间
+
+// notes
+// 如何分布扩容：总体采用空间换时间思维: 看前文unsigned long ht_used[2];
+// 便知ht[0]是旧的hashmap，ht[1]是新的hashmap；
+// 后续具体分析具体操作
 
 /* If safe is set to 1 this is a safe iterator, that means, you can call
  * dictAdd, dictFind, and other functions against the dictionary even while

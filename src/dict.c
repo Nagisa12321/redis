@@ -137,26 +137,33 @@ int dictResize(dict *d)
 /* Expand or create the hash table,
  * when malloc_failed is non-NULL, it'll avoid panic if malloc fails (in which case it'll be set to 1).
  * Returns DICT_OK if expand was performed, and DICT_ERR if skipped. */
+
+// notes
+// 扩容
 int _dictExpand(dict *d, unsigned long size, int* malloc_failed)
 {
     if (malloc_failed) *malloc_failed = 0;
 
     /* the size is invalid if it is smaller than the number of
      * elements already inside the hash table */
+    // 正在扩容中还要求扩容，返回错误
     if (dictIsRehashing(d) || d->ht_used[0] > size)
         return DICT_ERR;
 
     /* the new hash table */
     dictEntry **new_ht_table;
     unsigned long new_ht_used;
+    // 新的大小
     signed char new_ht_size_exp = _dictNextExp(size);
 
     /* Detect overflows */
+    // 防止溢出
     size_t newsize = 1ul<<new_ht_size_exp;
     if (newsize < size || newsize * sizeof(dictEntry*) < newsize)
         return DICT_ERR;
 
     /* Rehashing to the same table size is not useful. */
+    // 新的哈希表和旧的一样大小，没有意义，返回错误
     if (new_ht_size_exp == d->ht_size_exp[0]) return DICT_ERR;
 
     /* Allocate the new hash table and initialize all pointers to NULL */
@@ -166,12 +173,16 @@ int _dictExpand(dict *d, unsigned long size, int* malloc_failed)
         if (*malloc_failed)
             return DICT_ERR;
     } else
+        // !!!
+        // 申请一段连续空间（数组），元素是[dictEntry*], 长度是newsize
+        // !!!
         new_ht_table = zcalloc(newsize*sizeof(dictEntry*));
 
     new_ht_used = 0;
 
     /* Is this the first initialization? If so it's not really a rehashing
      * we just set the first hash table so that it can accept keys. */
+    // 如果是刚初始化，那么直接赋值返回即可
     if (d->ht_table[0] == NULL) {
         d->ht_size_exp[0] = new_ht_size_exp;
         d->ht_used[0] = new_ht_used;
@@ -180,6 +191,7 @@ int _dictExpand(dict *d, unsigned long size, int* malloc_failed)
     }
 
     /* Prepare a second hash table for incremental rehashing */
+    // 如果不存在旧的hashmap，那么新的hashmap放在1的位置即可。
     d->ht_size_exp[1] = new_ht_size_exp;
     d->ht_used[1] = new_ht_used;
     d->ht_table[1] = new_ht_table;
@@ -988,18 +1000,24 @@ static int dictTypeExpandAllowed(dict *d) {
 }
 
 /* Expand the hash table if needed */
+// notes
+// 如果需要，对hashmap进行扩容
 static int _dictExpandIfNeeded(dict *d)
 {
     /* Incremental rehashing already in progress. Return. */
+    // 已经在渐进式扩容过程中，则直接返回
     if (dictIsRehashing(d)) return DICT_OK;
 
     /* If the hash table is empty expand it to the initial size. */
+    // 如果哈希表为空，扩展为初始大小
     if (DICTHT_SIZE(d->ht_size_exp[0]) == 0) return dictExpand(d, DICT_HT_INITIAL_SIZE);
 
     /* If we reached the 1:1 ratio, and we are allowed to resize the hash
      * table (global setting) or we should avoid it but the ratio between
      * elements/buckets is over the "safe" threshold, we resize doubling
      * the number of buckets. */
+    // 配置了可扩容的时候，负载达到1:1的时候就会扩容一倍容量
+    // 不可扩容时，负载达到1:5同样会进行扩容
     if (d->ht_used[0] >= DICTHT_SIZE(d->ht_size_exp[0]) &&
         (dict_can_resize ||
          d->ht_used[0]/ DICTHT_SIZE(d->ht_size_exp[0]) > dict_force_resize_ratio) &&
