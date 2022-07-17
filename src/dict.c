@@ -337,11 +337,21 @@ static void _dictRehashStep(dict *d) {
 }
 
 /* Add an element to the target hash table */
+// notes
+// 向哈系表中插入新的key和value
 int dictAdd(dict *d, void *key, void *val)
 {
     dictEntry *entry = dictAddRaw(d,key,NULL);
 
+    // 如果entry是NULL
+    // 说明key已经存在
+    // 这被定义为ERR情况
     if (!entry) return DICT_ERR;
+
+    // 注意dictAddRaw已经设置好key的值了
+    // 以下设置value的值方法和设置key的值相同
+    // 如果存在valDup则调用
+    // 否则直接指针赋值
     dictSetVal(d, entry, val);
     return DICT_OK;
 }
@@ -364,16 +374,22 @@ int dictAdd(dict *d, void *key, void *val)
  *
  * If key was added, the hash entry is returned to be manipulated by the caller.
  */
+// notes
+// 低级添加或查找：此函数添加条目，但不是设置值，
+// 而是将 dictEntry 结构返回给用户，这将确保根据需要填充值字段。 
+// 这个函数也直接暴露给用户API被调用，主要是为了在哈希值中存储非指针
 dictEntry *dictAddRaw(dict *d, void *key, dictEntry **existing)
 {
     long index;
     dictEntry *entry;
     int htidx;
 
+    // 渐进式扩容
     if (dictIsRehashing(d)) _dictRehashStep(d);
 
     /* Get the index of the new element, or -1 if
      * the element already exists. */
+    // 获取新元素的下标，如果返回-1说明新的元素已经存在与其中了
     if ((index = _dictKeyIndex(d, key, dictHashKey(d,key), existing)) == -1)
         return NULL;
 
@@ -381,17 +397,27 @@ dictEntry *dictAddRaw(dict *d, void *key, dictEntry **existing)
      * Insert the element in top, with the assumption that in a database
      * system it is more likely that recently added entries are accessed
      * more frequently. */
+    // 如果在rehashing，必然希望将新插入的放在新的
+    // 哈系表之中～
     htidx = dictIsRehashing(d) ? 1 : 0;
+    // 元数据大小，个人猜测为val的大小
+    // 好像以前版本redis没有meta概念。
     size_t metasize = dictMetadataSize(d);
     entry = zmalloc(sizeof(*entry) + metasize);
     if (metasize > 0) {
         memset(dictMetadata(entry), 0, metasize);
     }
+
+    // 这里操作可以看出
+    // 将新加入的entry放入链表头
+    // 原来的链表头变成entry.next; 
     entry->next = d->ht_table[htidx][index];
     d->ht_table[htidx][index] = entry;
     d->ht_used[htidx]++;
 
     /* Set the hash entry fields. */
+    // 设置key, 有keyDup函数则调用
+    // 如果没有则直接指针赋值。。
     dictSetKey(d, entry, key);
     return entry;
 }
@@ -1082,6 +1108,10 @@ static signed char _dictNextExp(unsigned long size)
  *
  * Note that if we are in the process of rehashing the hash table, the
  * index is always returned in the context of the second (new) hash table. */
+// notes
+// 查询在字典d中，是否可以放入key
+// 如果key存在，返回-1
+// 否则返回对应下标
 static long _dictKeyIndex(dict *d, const void *key, uint64_t hash, dictEntry **existing)
 {
     unsigned long idx, table;
@@ -1091,17 +1121,29 @@ static long _dictKeyIndex(dict *d, const void *key, uint64_t hash, dictEntry **e
     /* Expand the hash table if needed */
     if (_dictExpandIfNeeded(d) == DICT_ERR)
         return -1;
+    // 在两个哈系表中都查看是否存在
     for (table = 0; table <= 1; table++) {
         idx = hash & DICTHT_SIZE_MASK(d->ht_size_exp[table]);
         /* Search if this slot does not already contain the given key */
+        // 通过key的到下标
+        // 通过下表再遍历拉链
         he = d->ht_table[table][idx];
         while(he) {
+            // 如果找到key相同的则返回-1
+            // key指针完全相同视为相同
+            // 其次根据type的compare函数比较为相同，也视作相同。
             if (key==he->key || dictCompareKeys(d, key, he->key)) {
                 if (existing) *existing = he;
                 return -1;
             }
             he = he->next;
         }
+        // 如果不是在渐进式变换过程中
+        // 则使用table[0]即可
+        // linus所说的: have a good taste
+        // 可以在这里体现
+        // 比如现在是rehashing，那么必然会找到htab1
+        // 的下标，无须多判断！
         if (!dictIsRehashing(d)) break;
     }
     return idx;

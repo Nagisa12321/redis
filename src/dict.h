@@ -64,6 +64,8 @@ typedef struct dictEntry {
     void *metadata[];           /* An arbitrary number of bytes (starting at a
                                  * pointer-aligned address) of size as returned
                                  * by dictType's dictEntryMetadataBytes(). */
+    // 看注释的话，这里允许dictEntry携带额外的调用者定义的元数据，
+    // 而dict自身就依赖此实现多态。这里的方法稍后分析。
 } dictEntry;
 
 typedef struct dict dict;
